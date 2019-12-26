@@ -5,11 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+type Mesasge struct {
+	TimeLocal time.Time
+	BytesSent int
+	Path, Method, Scheme, Status string
+	UpstreamTime, RequestTime float64
+}
 
 type Reader interface {
 	Read(rc chan []byte)
@@ -58,21 +67,39 @@ func (r *ReadFromFile) Read(rc chan []byte) {
 
 }
 
-func (w *WriteToInflux) Write(wc chan string) {
-	for v := range wc {
-		fmt.Printf("%s\n", v)
-	}
-}
-
 func (l *LogProcess) Process() {
 	// parse the log
-
+	/**
+	172.0.0.12 - - [04/Mar/2018:13:49:52 +0000] http "GET /foo?query=t HTTP/1.0" 200 2133 "-" "KeepAliveClient" "-" 1.005 1.854
+	*/
+	loc, _ := time.LoadLocation("America/New_York")
+	re := regexp.MustCompile(`([\d\.]+)\s+([^ \[]+)\s+([^ \[]+)\s+\[([^\]]+)\]\s+([a-z]+)\s+\"([^"]+)\"\s+(\d{3})\s+(\d+)\s+\"([^"]+)\"\s+\"(.*?)\"\s+\"([\d\.-]+)\"\s+([\d\.-]+)\s+([\d\.-]+)`)
 	for v := range l.rc {
+		matchedGroup := re.FindStringSubmatch(string(v))
+		if len(matchedGroup) != 13 {
+			log.Println("Match failed", string(v))
+			continue
+		}
+
+		msg := &Mesasge{}
+		t, err := time.ParseInLocation("02/Jan/2006: 15:04:05 +0000", matchedGroup[4], loc)
+		if err != nil {
+			log.Println("ParseInLocation failed", err.Error(), matchedGroup[4])
+		}
+
+		msg.TimeLocal = t
+		byteSent, _ := strconv.Atoi(matchedGroup[8])
+		msg.BytesSent = byteSent
 		l.wc <- strings.ToUpper(string(v))
 	}
 
 }
 
+func (w *WriteToInflux) Write(wc chan string) {
+	for v := range wc {
+		fmt.Printf("%s\n", v)
+	}
+}
 
 func main() {
 	r := &ReadFromFile {
