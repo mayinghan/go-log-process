@@ -53,7 +53,7 @@ func (r *ReadFromFile) Read(rc chan []byte) {
 		} else if err != nil {
 			panic(errors.New("error happened when reading by line"))
 		}
-		rc <- line
+		rc <- line[:len(line) - 1]
 	}
 
 }
