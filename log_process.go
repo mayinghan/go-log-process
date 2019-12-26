@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Reader interface {
-	Read(rc chan string)
+	Read(rc chan []byte)
 }
 
 type Writer interface {
@@ -15,7 +20,7 @@ type Writer interface {
 }
 
 type LogProcess struct {
-	rc chan string // channel for read
+	rc chan []byte // channel for read
 	wc chan string // channel for write
 	reader Reader
 	writer Writer
@@ -29,26 +34,49 @@ type WriteToInflux struct {
 	influxDBsn string
 }
 
-func (r *ReadFromFile) Read(rc chan string) {
-	line := "message"
-	rc <- line
+func (r *ReadFromFile) Read(rc chan []byte) {
+	f, err := os.Open(r.path)
+
+	if err != nil {
+		panic(errors.New("open file error"))
+	}
+
+	// read from the end of the file to make this a real-time monitor
+	f.Seek(0, 2) // move the read pointer to the  end of the file
+	rd := bufio.NewReader(f)
+
+	for {
+		line, err := rd.ReadBytes('\n')
+		if err == io.EOF {
+			time.Sleep(5000) // wait for new logs
+			continue
+		} else if err != nil {
+			panic(errors.New("error happened when reading by line"))
+		}
+		rc <- line
+	}
+
 }
 
 func (w *WriteToInflux) Write(wc chan string) {
-	fmt.Printf("%s\n", <-wc)
+	for v := range wc {
+		fmt.Printf("%s\n", v)
+	}
 }
 
 func (l *LogProcess) Process() {
 	// parse the log
-	data := <- l.rc
-	l.wc <- strings.ToUpper(data)
-}
 
+	for v := range l.rc {
+		l.wc <- strings.ToUpper(string(v))
+	}
+
+}
 
 
 func main() {
 	r := &ReadFromFile {
-		path: "/tmp/access.log",
+		path: "fakedata/access.log",
 	}
 
 	w := &WriteToInflux{
@@ -56,12 +84,11 @@ func main() {
 	}
 
 	lp := &LogProcess {
-		rc:	make(chan string),
+		rc:	make(chan []byte),
 		wc: make(chan string),
 		reader: r,
 		writer: w,
 	}
-
 
 	// concurrently handle three functionality
 	var wg sync.WaitGroup
